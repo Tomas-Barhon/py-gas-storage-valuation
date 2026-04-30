@@ -1,0 +1,23 @@
+[project]
+name = "py-gas-storage-valuation"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [{ name = "Tomas-Barhon", email = "tomas.barhon@hotmail.cz" }]
+requires-python = ">=3.12"
+dependencies = [
+  "matplotlib>=3.10.9",
+  "numpy>=2.4.4",
+  "pandas>=3.0.2",
+  "polars>=1.40.1",
+  "rich>=15.0.0",
+  "seaborn>=0.13.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.26,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 79
+quote-style = "double"
