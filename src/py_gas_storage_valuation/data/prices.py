@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Literal, Optional, Generator
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ForwardCurve:
     """A class to represent a forward curve for gas storage valuation.
 

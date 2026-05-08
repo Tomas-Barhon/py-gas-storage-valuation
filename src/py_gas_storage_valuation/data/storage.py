@@ -1,3 +1,4 @@
+from typing import Literal
 import polars as pl
 from dataclasses import dataclass
 import numpy as np
@@ -6,7 +7,7 @@ from rich.console import Console
 from io import StringIO
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class InjectionWithdrawalCurve:
     bin_upper_thresholds: np.ndarray
     injection_rates: np.ndarray
@@ -87,6 +88,7 @@ class InjectionWithdrawalCurve:
         return console.file.getvalue()
 
 
+@dataclass(frozen=True, slots=True)
 class GasStorage:
     """A class to represent a gas storage facility for valuation purposes.
 
@@ -99,9 +101,13 @@ class GasStorage:
         self,
         capacity: float,
         injection_withdrawal_curve: InjectionWithdrawalCurve,
+        storage_period: Literal["M", "Y"],
+        # start_date: Optional[str | ]
+        # end_date:
     ) -> None:
         self._capacity = capacity
         self._injection_withdrawal_curve = injection_withdrawal_curve
+        self.storage_period = storage_period
 
     @property
     def capacity(self) -> float:
@@ -130,3 +136,19 @@ class GasStorage:
             f"GasStorage(capacity={self.capacity}, "
             f"injection_withdrawal_curve=\n{self._injection_withdrawal_curve})"
         )
+
+    def inject(self, ammount):
+        if ammount <= self._injection_withdrawal_curve.get_injection_rate(
+            self._capacity
+        ):
+            self._capacity += ammount
+        else:
+            raise ValeErrror("Cannot inject more than injection curve allows.")
+
+    def withdraw(self, ammount):
+        if ammount <= self._injection_withdrawal_curve.get_withdrawal_rate(
+            self._capacity
+        ):
+            self._capacity += ammount
+        else:
+            raise ValeErrror("Cannot withdraw more than withdrawal curve allows.")
