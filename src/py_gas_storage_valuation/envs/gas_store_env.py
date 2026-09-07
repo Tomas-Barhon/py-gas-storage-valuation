@@ -20,12 +20,15 @@ class GasStorageEnv(gym.Env):
         self._price_model = price_model
         self._current_step = 0
         self._max_steps = max_steps
+        self._injection_costs = injection_costs
+        self._withdrawal_costs = withdrawal_costs
+        self._forward_curve = self._price_model.simulate_forward_curve()
 
         self.action_space = gym.spaces.Box(
             low=-self._gas_storage.max_withdrawal_rate,
             high=self._gas_storage.max_injection_rate,
             shape=(1,),
-            dtype=float,
+            dtype=np.float32,
         )
 
         # (sine,cosine, inventory, F1, F2, ..., F12)
@@ -40,36 +43,72 @@ class GasStorageEnv(gym.Env):
             dtype=np.float32,
         )
 
-    def reset(self, seed=None, options=None):
+    def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
+
         self._current_step = 0
+
         self._gas_storage = GasStorage(
-            capacity=self._gas_storage.capacity,
-            injection_withdrawal_curve=self._gas_storage._injection_withdrawal_curve,
-            storage_period=self._gas_storage.storage_period,
+            self._gas_storage._capacity,
+            self._gas_storage._injection_withdrawal_curve,
+            self._gas_storage._storage_period,
         )
+
+        self._forward_curve = self._price_model.simulate_forward_curve()
+
+        current_forward = next(self._forward_curve)
+
+        observation = np.concatenate(
+            [
+                self._encode_seasonality(),
+                np.array([self._gas_storage._current_inventory], dtype=np.float32),
+                current_forward,
+            ]
+        )
+
+        return observation, {}
+
+    def _evaluate_action_costs(self, action):
+        costs = 0.0
+        if action > 0:
+            costs += action * self._injection_costs
+        else:
+            costs += -action * self._withdrawal_costs
+        return costs
+
+    def _encode_seasonality(self) -> np.ndarray:
+        """_encode_seasonality encodes the current step as a sine and cosine value to capture seasonality effects."""
+        seasonality = 2 * np.pi * self._current_step / self._max_steps
+        return np.array([np.sin(seasonality), np.cos(seasonality)], dtype=np.float32)
+
+    def _calculate_cash_flow(self, action, current_forward):
+        cash_flow = -action * current_forward[self._current_step]  # Buying gas
+        return cash_flow
 
     def step(self, action):
         action = np.clip(action, self.action_space.low, self.action_space.high)
+        costs = self._evaluate_action_costs(action)
 
         if action > 0:
             self._gas_storage.inject(action)
         else:
             self._gas_storage.withdraw(-action)
 
-        current_price = self._price_model.step(self.current_step)
+        current_forward = next(self._forward_curve)
+
+        cash_flow = self._calculate_cash_flow(action, current_forward)
+
         self._current_step += 1
 
-        # TODO: implement reward
-        reward = ...
+        # TODO: implementnt reward
+        reward = cash_flow - costs
 
-        done = self.current_step >= self._max_steps
+        done = self._current_step >= self._max_steps - 1
 
         # TODO: implement observation
-        observation = ...
+        observation = np.concatenate(
+            self._encode_seasonality(),
+            [self._gas_storage._current_inventory] + current_forward,
+        )
 
         return observation, reward, done, {}
-
-    # TODO: implement rendering that will show the injection withdrawal curve
-    # history and current state and action
-    def render(self): ...

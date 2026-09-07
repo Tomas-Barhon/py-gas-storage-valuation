@@ -14,11 +14,8 @@ def main():
         withdrawal_rates=withdrawal_rates,
     )
 
-    storage_capacity = 100000.0
-    gas_storage = GasStorage(
-        capacity=storage_capacity,
-        injection_withdrawal_curve=injection_withdrawal_curve,
-    )
+    storage_capacity = 100_000.0
+    gas_storage = GasStorage(storage_capacity, injection_withdrawal_curve, "Y")
 
     print(gas_storage)
 

@@ -67,7 +67,7 @@ class InjectionWithdrawalCurve:
 
     def __str__(self) -> str:
         table = Table(title="Injection/Withdrawal Curve")
-        table.add_column("Bin", justify="right")
+        table.add_column("Lower Threshold", justify="right")
         table.add_column("Upper Threshold", justify="right")
         table.add_column("Withdrawal Rate", justify="right")
         table.add_column("Injection Rate", justify="right")
@@ -88,7 +88,7 @@ class InjectionWithdrawalCurve:
         return console.file.getvalue()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class GasStorage:
     """A class to represent a gas storage facility for valuation purposes.
 
@@ -97,22 +97,10 @@ class GasStorage:
 
     """
 
-    def __init__(
-        self,
-        capacity: float,
-        injection_withdrawal_curve: InjectionWithdrawalCurve,
-        storage_period: Literal["M", "Y"],
-        # start_date: Optional[str | ]
-        # end_date:
-    ) -> None:
-        self._capacity = capacity
-        self._injection_withdrawal_curve = injection_withdrawal_curve
-        self.storage_period = storage_period
-
-    @property
-    def capacity(self) -> float:
-        """Return the maximum storage capacity."""
-        return self._capacity
+    _capacity: float
+    _injection_withdrawal_curve: InjectionWithdrawalCurve
+    _storage_period: Literal["M", "Y"] = "Y"
+    _current_inventory: float = 0.0
 
     @property
     def max_injection_rate(self) -> float:
@@ -126,29 +114,29 @@ class GasStorage:
 
     def __repr__(self) -> str:
         return (
-            f"GasStorage(capacity={self.capacity}, "
+            f"GasStorage(capacity={self._capacity}, "
             f"injection_withdrawal_curve={self._injection_withdrawal_curve})"
         )
 
     def __str__(self) -> str:
         # TODO: adjust after storage complete
         return (
-            f"GasStorage(capacity={self.capacity}, "
+            f"GasStorage(capacity={self._capacity}, "
             f"injection_withdrawal_curve=\n{self._injection_withdrawal_curve})"
         )
 
     def inject(self, ammount):
         if ammount <= self._injection_withdrawal_curve.get_injection_rate(
-            self._capacity
+            self._current_inventory
         ):
-            self._capacity += ammount
+            self._current_inventory += ammount
         else:
             raise ValeErrror("Cannot inject more than injection curve allows.")
 
     def withdraw(self, ammount):
         if ammount <= self._injection_withdrawal_curve.get_withdrawal_rate(
-            self._capacity
+            self._current_inventory
         ):
-            self._capacity += ammount
+            self._current_inventory += ammount
         else:
             raise ValeErrror("Cannot withdraw more than withdrawal curve allows.")

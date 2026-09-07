@@ -14,7 +14,7 @@ class ForwardCurve:
     """
 
     df: pl.DataFrame
-    period: Literal["M", "D"]
+    period: Literal["M", "D"] = "M"
     metadata: Optional[dict] = None
 
     @property
