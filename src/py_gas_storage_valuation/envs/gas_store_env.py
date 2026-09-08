@@ -1,8 +1,10 @@
 "This module contains the GasStorageEnv class, which is a custom gymnasium compatible environment for gas storage valuation."
 
 import gymnasium as gym
+from numpy.random import laplace
 from py_gas_storage_valuation.data.storage import GasStorage
 from py_gas_storage_valuation.prices.base_price_simulator import BasePriceSimulator
+from py_gas_storage_valuation.prices.price_buffer import ForwardCurvePathBuffer
 import numpy as np
 
 
@@ -10,19 +12,17 @@ class GasStorageEnv(gym.Env):
     def __init__(
         self,
         gas_storage: GasStorage,
-        price_model: BasePriceSimulator,
         max_steps: int = 12,
         injection_costs: float = 0.0,
         withdrawal_costs: float = 0.0,
     ):
         super().__init__()
         self._gas_storage = gas_storage
-        self._price_model = price_model
         self._current_step = 0
         self._max_steps = max_steps
         self._injection_costs = injection_costs
         self._withdrawal_costs = withdrawal_costs
-        self._forward_curve = self._price_model.simulate_forward_curve()
+        self._forward_curve = None
 
         self.action_space = gym.spaces.Box(
             low=-self._gas_storage.max_withdrawal_rate,
@@ -44,7 +44,13 @@ class GasStorageEnv(gym.Env):
         )
 
     def reset(self, *, seed=None, options=None):
+        # the forward curve is passed during reset
         super().reset(seed=seed)
+        if options is None or "forward_curve" not in options:
+            raise ValueError("A forward curve must be provided.")
+
+        # NOTE: consider input validation
+        self._forward_curve = options["forward_curve"]
 
         self._current_step = 0
 
@@ -54,15 +60,11 @@ class GasStorageEnv(gym.Env):
             self._gas_storage._storage_period,
         )
 
-        self._forward_curve = self._price_model.simulate_forward_curve()
-
-        current_forward = next(self._forward_curve)
-
         observation = np.concatenate(
             [
                 self._encode_seasonality(),
                 np.array([self._gas_storage._current_inventory], dtype=np.float32),
-                current_forward,
+                self._forward_curve[self._current_step],
             ]
         )
 
@@ -86,17 +88,21 @@ class GasStorageEnv(gym.Env):
         return cash_flow
 
     def step(self, action):
-        action = np.clip(action, self.action_space.low, self.action_space.high)
+        # inject or withdraw current t
+        action = np.float32(
+            np.clip(action, self.action_space.low, self.action_space.high)[0]
+        )
+        # injection and withdrawal costs
         costs = self._evaluate_action_costs(action)
+
+        cash_flow = self._calculate_cash_flow(
+            action, self._forward_curve[self._current_step]
+        )
 
         if action > 0:
             self._gas_storage.inject(action)
         else:
             self._gas_storage.withdraw(-action)
-
-        current_forward = next(self._forward_curve)
-
-        cash_flow = self._calculate_cash_flow(action, current_forward)
 
         self._current_step += 1
 
@@ -107,8 +113,11 @@ class GasStorageEnv(gym.Env):
 
         # TODO: implement observation
         observation = np.concatenate(
-            self._encode_seasonality(),
-            [self._gas_storage._current_inventory] + current_forward,
+            [
+                self._encode_seasonality(),
+                [self._gas_storage._current_inventory],
+                self._forward_curve[self._current_step],
+            ]
         )
 
         return observation, reward, done, {}
