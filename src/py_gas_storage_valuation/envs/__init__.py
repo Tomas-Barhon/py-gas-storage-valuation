@@ -1,6 +1,6 @@
 from gymnasium.envs.registration import register
 
-from py_gas_storage_valuation.envs.gas_store_env import (  # noqa: F401
+from py_gas_storage_valuation.envs.gas_storage_env import (  # noqa: F401
     GasStorageEnv,
 )
 

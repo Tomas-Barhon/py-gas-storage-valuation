@@ -3,13 +3,16 @@ import numpy as np
 from stable_baselines3 import SAC
 
 from py_gas_storage_valuation.data.storage import (
-    GasStorage,
     InjectionWithdrawalCurve,
+)
+from py_gas_storage_valuation.envs.gas_storage_env import (
+    dummy_vectorize_gas_storage_env,
 )
 from py_gas_storage_valuation.prices.mock_forward_simulator import (
     MockForwardSimulator,
 )
 from py_gas_storage_valuation.prices.price_buffer import ForwardCurvePathBuffer
+from py_gas_storage_valuation.utils.profiling import Timer
 
 
 def main():
@@ -23,32 +26,25 @@ def main():
         withdrawal_rates=withdrawal_rates,
     )
 
-    storage_capacity = 100_000.0
-    gas_storage = GasStorage(storage_capacity, injection_withdrawal_curve, "Y")
-    print(gas_storage)
-
     simulator = MockForwardSimulator()
     price_buffer = ForwardCurvePathBuffer(simulator)
+    storage_kwargs = {
+        "_capacity": 100_000.0,
+        "_injection_withdrawal_curve": injection_withdrawal_curve,
+    }
 
-    env = gym.make(
-        "GasStorage-v0", gas_storage=gas_storage, max_episode_steps=12
+    vectorized_env = dummy_vectorize_gas_storage_env(
+        price_buffer=price_buffer, num_envs=32, **storage_kwargs
     )
 
-    agent = SAC("MlpPolicy", env, verbose=1)
-    agent.learn(total_timesteps=10000)
-
-    obs, info = env.reset(options={"forward_curve": price_buffer.get_path()})
-    done = False
-    while not done:
-        action, _ = agent.predict(obs)
-        obs, reward, terminated, truncated, _ = env.step(action)
-        done = terminated or truncated
-        step = env._current_step
-        inv = env._gas_storage._current_inventory
-        print(
-            f"Step: {step}, Action: {action},"
-            f" Reward: {reward}, Inventory: {inv}"
+    with Timer("Training SAC agent"):
+        agent = SAC(
+            "MlpPolicy",
+            vectorized_env,
+            verbose=1,
+            tensorboard_log="./run_logs/sac_gas_storage",
         )
+        agent.learn(total_timesteps=100_000)
 
 
 if __name__ == "__main__":
