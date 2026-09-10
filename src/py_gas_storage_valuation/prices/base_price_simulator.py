@@ -1,5 +1,6 @@
-import numpy as np
 from typing import Protocol
+
+import numpy as np
 
 
 class BaseForwardSimulator(Protocol):
@@ -9,4 +10,6 @@ class BaseForwardSimulator(Protocol):
 
     def batch_simulate_forward(self, n_paths: int) -> np.ndarray:
         """Return a batch of n_paths 2D arrays of simulated forward prices."""
-        raise NotImplementedError("This method should be implemented by subclasses.")
+        raise NotImplementedError(
+            "This method should be implemented by subclasses."
+        )

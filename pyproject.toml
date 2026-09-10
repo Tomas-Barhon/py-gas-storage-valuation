@@ -6,14 +6,25 @@ readme = "README.md"
 authors = [{ name = "Tomas-Barhon", email = "tomas.barhon@hotmail.cz" }]
 requires-python = ">=3.12"
 dependencies = [
+  "cupy-cuda13x>=14.2.0",
   "gymnasium>=1.3.0",
+  "matplot3dex>=0.1",
   "matplotlib>=3.10.9",
   "numpy>=2.4.4",
   "pandas>=3.0.2",
   "polars>=1.40.1",
   "rich>=15.0.0",
+  "sb3-contrib>=2.9.0",
   "seaborn>=0.13.2",
   "stable-baselines3>=2.9.0",
+]
+
+[dependency-groups]
+dev = [
+  "pre-commit>=4.0",
+  "pytest>=8.0",
+  "ruff>=0.16.0",
+  "ty>=0.0.48",
 ]
 
 [build-system]
@@ -22,4 +33,17 @@ build-backend = "uv_build"
 
 [tool.ruff]
 line-length = 79
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
 quote-style = "double"
+indent-style = "space"
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

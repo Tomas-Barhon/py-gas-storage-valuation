@@ -1,10 +1,10 @@
-from typing import Literal
-import polars as pl
 from dataclasses import dataclass
-import numpy as np
-from rich.table import Table
-from rich.console import Console
 from io import StringIO
+from typing import Literal
+
+import numpy as np
+from rich.console import Console
+from rich.table import Table
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,18 +21,28 @@ class InjectionWithdrawalCurve:
         ):
             raise ValueError("All arrays must have the same length.")
         if not np.all(np.diff(self.bin_upper_thresholds) > 0):
-            raise ValueError("bin_upper_thresholds must be strictly increasing.")
-        if np.any(self.withdrawal_rates < 0) or np.any(self.injection_rates < 0):
+            raise ValueError(
+                "bin_upper_thresholds must be strictly increasing."
+            )
+        if np.any(self.withdrawal_rates < 0) or np.any(
+            self.injection_rates < 0
+        ):
             raise ValueError("Rates must be between 0 and 1.")
-        if np.any(self.withdrawal_rates > 1) or np.any(self.injection_rates > 1):
+        if np.any(self.withdrawal_rates > 1) or np.any(
+            self.injection_rates > 1
+        ):
             raise ValueError("Rates must be between 0 and 1.")
 
     def _get_rate(self, value: float, injection: bool = True) -> float:
-        """Return injection or withdrawal_rates for the bin containing value."""
+        """Return rate for the bin containing value."""
         idx = np.searchsorted(self.bin_upper_thresholds, value, side="right")
         if idx == len(self.bin_upper_thresholds):
             idx -= 1
-        return self.injection_rates[idx] if injection else self.withdrawal_rates[idx]
+        return (
+            self.injection_rates[idx]
+            if injection
+            else self.withdrawal_rates[idx]
+        )
 
     def get_injection_rate(self, value: float) -> float:
         """Return injection rate for the bin containing value."""
@@ -74,7 +84,10 @@ class InjectionWithdrawalCurve:
 
         lower_bound = 0.0
         for thresh, w_rate, i_rate in zip(
-            self.bin_upper_thresholds, self.withdrawal_rates, self.injection_rates
+            self.bin_upper_thresholds,
+            self.withdrawal_rates,
+            self.injection_rates,
+            strict=True,
         ):
             table.add_row(
                 str(lower_bound),
@@ -101,6 +114,10 @@ class GasStorage:
     _injection_withdrawal_curve: InjectionWithdrawalCurve
     _storage_period: Literal["M", "Y"] = "Y"
     _current_inventory: float = 0.0
+
+    @property
+    def capacity(self) -> float:
+        return self._capacity
 
     @property
     def max_injection_rate(self) -> float:
@@ -131,7 +148,7 @@ class GasStorage:
         ):
             self._current_inventory += ammount
         else:
-            raise ValeErrror("Cannot inject more than injection curve allows.")
+            raise ValueError("Cannot inject more than injection curve allows.")
 
     def withdraw(self, ammount):
         if ammount <= self._injection_withdrawal_curve.get_withdrawal_rate(
@@ -139,4 +156,6 @@ class GasStorage:
         ):
             self._current_inventory += ammount
         else:
-            raise ValeErrror("Cannot withdraw more than withdrawal curve allows.")
+            raise ValueError(
+                "Cannot withdraw more than withdrawal curve allows."
+            )

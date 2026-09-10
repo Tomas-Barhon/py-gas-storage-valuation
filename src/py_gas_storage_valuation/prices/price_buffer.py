@@ -1,8 +1,11 @@
 import numpy as np
-from py_gas_storage_valuation.prices.base_price_simulator import BaseForwardSimulator
+
+from py_gas_storage_valuation.prices.base_price_simulator import (
+    BaseForwardSimulator,
+)
 
 
-# NOTE: consider more efficient implementation
+# NOTE: consider more efficient implementation using queue
 class ForwardCurvePathBuffer:
     def __init__(
         self,
