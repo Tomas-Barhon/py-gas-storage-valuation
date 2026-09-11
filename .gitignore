@@ -14,3 +14,6 @@ wheels/
 thesis/
 run_logs/
 
+
+# opencode config files
+.opencode/
