@@ -41,8 +41,3 @@ uv run pre-commit install
 ```
 
 This runs ruff lint, ruff format, ty, and pytest on every commit.
-
-## Editor setup (Nvim)
-
-Requires `ruff` LSP and `conform.nvim` configured for Python. See
-`nvim/lua/plugins/ruff.lua` in the dotfiles repo.
