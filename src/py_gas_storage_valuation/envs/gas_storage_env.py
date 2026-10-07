@@ -117,28 +117,41 @@ class GasStorageEnv(gym.Env):
         inventory = np.array(
             [self._gas_storage._current_inventory], dtype=np.float32
         )
-        forward_curve = self._forward_curve[self._current_step]
+        if self._forward_curve is not None:
+            forward_curve = self._forward_curve[self._current_step]
+        else:
+            raise ValueError(
+                "Forward curve is not set. Call reset() before step()."
+            )
+
         observation = np.concatenate(
             [seasonality, inventory.flatten(), forward_curve]
         )
         return observation
 
     def _calculate_cash_flow(self, action):
-        cash_flow = (
-            -action * self._forward_curve[self._current_step][0]
-        )  # Buying gas
+        if self._forward_curve is not None:
+            cash_flow = (
+                -action * self._forward_curve[self._current_step][0]
+            )  # Buying gas
+        else:
+            raise ValueError(
+                "Forward curve is not set. Call reset() before step()."
+            )
+
         return cash_flow
 
     def step(self, action):
+        curve = self._gas_storage._injection_withdrawal_curve
+        inventory = self._gas_storage._current_inventory
+
         # inject or withdraw clipping
         # based on the current inventory and the injection/withdrawal curve
         if action > 0:
-            max_injection = self._gas_storage._injection_withdrawal_curve.get_injection_rate(
-                self._gas_storage._current_inventory
-            )
+            max_injection = curve.get_injection_rate(inventory)
             action = min(action, max_injection)
         else:
-            max_withdrawal = self._gas_storage._injection_withdrawal_curve.get_withdrawal_rate(
+            max_withdrawal = curve.get_withdrawal_rate(
                 self._gas_storage._current_inventory
             )
             action = max(action, -max_withdrawal)

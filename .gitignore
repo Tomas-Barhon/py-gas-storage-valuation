@@ -12,6 +12,7 @@ wheels/
 
 # thesis materials
 thesis/
+data/
 run_logs/
 
 
