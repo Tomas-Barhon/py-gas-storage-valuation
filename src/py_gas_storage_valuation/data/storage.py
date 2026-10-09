@@ -154,7 +154,7 @@ class GasStorage:
         if ammount <= self._injection_withdrawal_curve.get_withdrawal_rate(
             self._current_inventory
         ):
-            self._current_inventory += ammount
+            self._current_inventory -= ammount
         else:
             raise ValueError(
                 "Cannot withdraw more than withdrawal curve allows."
