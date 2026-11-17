@@ -46,3 +46,6 @@ python-version = "3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ty.src]
+exclude = ["**/*.ipynb"]
