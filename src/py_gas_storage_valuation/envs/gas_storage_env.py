@@ -59,17 +59,25 @@ class GasStorageEnv(gym.Env):
         self._withdrawal_costs = withdrawal_costs
         self._forward_curve = None
         self._price_buffer = price_buffer
+        self._futures_positions = np.zeros(
+            (self._max_steps,), dtype=np.float32
+        )
+
+        # remaining-month schedule converted to absolutes internally
         self.action_space = gym.spaces.Box(
-            low=-self._gas_storage.max_withdrawal_rate,
-            high=self._gas_storage.max_injection_rate,
-            shape=(1,),
+            low=-1,
+            high=1,
+            shape=(self._max_steps,),
             dtype=np.float32,
         )
 
         # (sine,cosine, inventory, F1, F2, ..., F12)
-        low = np.array([-1.0, -1.0, 0.0] + [-np.inf] * 12, dtype=np.float32)
+        low = np.array(
+            [-1.0, -1.0, 0.0] + [-np.inf] * self._max_steps, dtype=np.float32
+        )
         high = np.array(
-            [1.0, 1.0, self._gas_storage.capacity] + [np.inf] * 12,
+            [1.0, 1.0, self._gas_storage.capacity]
+            + [np.inf] * self._max_steps,
             dtype=np.float32,
         )
 
@@ -97,12 +105,12 @@ class GasStorageEnv(gym.Env):
         observation = self._concat_observation()
         return observation, {}
 
-    def _evaluate_action_costs(self, action):
+    def _evaluate_action_costs(self, schedule):
         costs = 0.0
-        if action > 0:
-            costs += action * self._injection_costs
-        else:
-            costs += -action * self._withdrawal_costs
+        if schedule[self._current_step] > 0:
+            costs += self._injection_costs * schedule[self._current_step]
+        elif schedule[self._current_step] < 0:
+            costs -= self._withdrawal_costs * schedule[self._current_step]
         return costs
 
     def _encode_seasonality(self) -> np.ndarray:
@@ -129,50 +137,84 @@ class GasStorageEnv(gym.Env):
         )
         return observation
 
-    def _calculate_cash_flow(self, action):
+    def _calculate_cash_flow(self, schedule):
+        # calc cash flows from physical injection/withdrawal
+        current_action = schedule[self._current_step]
+        if self._forward_curve is None:
+            raise ValueError(
+                "Forward curve is not set. Call reset() before step()."
+            )
+        return (
+            self._gas_storage._current_inventory
+            * current_action
+            * self._forward_curve[self._current_step]
+        )
+
+    def _calculate_futures_pnl_mtm(self):
+        if self._current_step == 0:
+            return 0.0
+
         if self._forward_curve is not None:
-            cash_flow = (
-                -action * self._forward_curve[self._current_step][0]
-            )  # Buying gas
+            # calc mtm changes in non expired futures
+            price_diffs = (
+                self._forward_curve[self._current_step]
+                - self._forward_curve[self._current_step - 1]
+            )
+            futures_pnl = np.sum(
+                self._futures_positions[self._current_step :]
+                * price_diffs[self._current_step :]
+            )
+
         else:
             raise ValueError(
                 "Forward curve is not set. Call reset() before step()."
             )
 
-        return cash_flow
+        return futures_pnl
+
+    def _rebalance_futures_positions(self, schedule):
+        # we already assume passed actions are zeroed out
+        self._futures_positions = schedule
+        return self
+
+    def _decode_schedule(self, action):
+        # decode the action into a feasible schedule
+        # we will zero out passed time steps here
+        schedule = np.zeros_like(action, dtype=np.float32)
+
+        return schedule
+
+    def _settle_current_flows(self, schedule):
+        phys_cash_flow = self._calculate_cash_flow(schedule)
+        costs = self._evaluate_action_costs(schedule)
+        futures_pnl = self._calculate_futures_pnl_mtm()
+
+        return phys_cash_flow, costs, futures_pnl
 
     def step(self, action):
-        curve = self._gas_storage._injection_withdrawal_curve
-        inventory = self._gas_storage._current_inventory
+        # settle money
+        schedule = self._decode_schedule(action)
 
-        # inject or withdraw clipping
-        # based on the current inventory and the injection/withdrawal curve
-        if action > 0:
-            max_injection = curve.get_injection_rate(inventory)
-            action = min(action, max_injection)
+        self._rebalance_futures_positions(schedule)
+
+        phys_cf, costs, futures_pnl = self._settle_current_flows(schedule)
+
+        if schedule[self._current_step] > 0:
+            self._gas_storage.inject(schedule[self._current_step])
         else:
-            max_withdrawal = curve.get_withdrawal_rate(
-                self._gas_storage._current_inventory
-            )
-            action = max(action, -max_withdrawal)
-
-        # injection and withdrawal costs
-        costs = self._evaluate_action_costs(action)
-
-        cash_flow = self._calculate_cash_flow(action)
-
-        if action > 0:
-            self._gas_storage.inject(action)
-        else:
-            self._gas_storage.withdraw(-action)
-
-        self._current_step += 1
-
-        # TODO: implementnt reward
-        reward = cash_flow - costs
-        truncated = self._current_step >= self._max_steps - 1
+            self._gas_storage.withdraw(-schedule[self._current_step])
 
         observation = self._concat_observation()
+        self._current_step += 1
+
+        reward = np.array([phys_cf - costs + futures_pnl], dtype=np.float32)
+        truncated = self._current_step >= self._max_steps
 
         # env never terminates, only truncated when max_steps is reached
-        return observation, reward[0], False, truncated, {}
+        return (
+            observation,
+            reward[0],
+            False,
+            truncated,
+            {"phys_cf": phys_cf, "costs": costs, "futures_pnl": futures_pnl},
+        )
