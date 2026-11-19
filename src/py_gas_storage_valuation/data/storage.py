@@ -52,6 +52,17 @@ class InjectionWithdrawalCurve:
         """Return withdrawal rate for the bin containing value."""
         return self._get_rate(value, injection=False)
 
+    def get_max_flow(
+        self, inventory: float, capacity: float, injection: bool = True
+    ) -> float:
+        if not np.isfinite(capacity) or capacity <= 0:
+            raise ValueError("Capacity must be positive and finite.")
+        if not np.isfinite(inventory) or not 0 <= inventory <= capacity:
+            raise ValueError("Inventory must be between zero and capacity.")
+        rate = self._get_rate(inventory / capacity, injection=injection)
+        available = capacity - inventory if injection else inventory
+        return float(min(rate * capacity, available))
+
     @property
     def num_bins(self) -> int:
         """Return the number of bins defined by the upper thresholds."""
@@ -106,7 +117,7 @@ class GasStorage:
     """A class to represent a gas storage facility for valuation purposes.
 
     Attributes:
-        capacity (float): The maximum storage capacity in cubic meters.
+        capacity (float): The maximum storage capacity in MWh.
 
     """
 
@@ -142,19 +153,21 @@ class GasStorage:
             f"injection_withdrawal_curve=\n{self._injection_withdrawal_curve})"
         )
 
-    def inject(self, ammount):
-        if ammount <= self._injection_withdrawal_curve.get_injection_rate(
-            self._current_inventory
-        ):
-            self._current_inventory += ammount
+    def inject(self, amount):
+        limit = self._injection_withdrawal_curve.get_max_flow(
+            self._current_inventory, self._capacity
+        )
+        if np.isfinite(amount) and 0 <= amount <= limit:
+            self._current_inventory += amount
         else:
             raise ValueError("Cannot inject more than injection curve allows.")
 
-    def withdraw(self, ammount):
-        if ammount <= self._injection_withdrawal_curve.get_withdrawal_rate(
-            self._current_inventory
-        ):
-            self._current_inventory -= ammount
+    def withdraw(self, amount):
+        limit = self._injection_withdrawal_curve.get_max_flow(
+            self._current_inventory, self._capacity, injection=False
+        )
+        if np.isfinite(amount) and 0 <= amount <= limit:
+            self._current_inventory -= amount
         else:
             raise ValueError(
                 "Cannot withdraw more than withdrawal curve allows."

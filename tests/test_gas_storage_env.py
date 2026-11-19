@@ -27,10 +27,10 @@ from py_gas_storage_valuation.envs.gas_storage_env import GasStorageEnv
 from py_gas_storage_valuation.prices.price_buffer import ForwardCurvePathBuffer
 
 N_MONTHS = 12
-PHYSICAL_CASH_FLOW = "physical_cash_flow"
+PHYSICAL_CASH_FLOW = "phys_cf"
 FUTURES_PNL = "futures_pnl"
 COSTS = "costs"
-PHYSICAL_FLOW = "physical_flow"
+SCHEDULE = "schedule"
 
 
 class StubPriceBuffer:
@@ -213,11 +213,11 @@ def test_capacity_and_costs_are_applied_in_mwh():
         _action(1.0, -1.0)
     )
 
-    assert injection_info[PHYSICAL_FLOW] == pytest.approx(50.0)
+    assert injection_info[SCHEDULE][0] == pytest.approx(50.0)
     assert injection_info[COSTS] == pytest.approx(50.0 * 2.0)
     assert injection_reward == pytest.approx(-600.0)
     assert after_injection[2] == pytest.approx(50.0)
-    assert withdrawal_info[PHYSICAL_FLOW] == pytest.approx(-50.0)
+    assert withdrawal_info[SCHEDULE][1] == pytest.approx(-50.0)
     assert withdrawal_info[COSTS] == pytest.approx(50.0 * 3.0)
     assert withdrawal_reward == pytest.approx(350.0)
     assert after_withdrawal[2] == pytest.approx(0.0)
@@ -237,13 +237,15 @@ def test_inventory_dependent_rates_apply_to_each_month_of_the_plan():
     env.reset()
 
     plan = _action(1.0, 1.0, -1.0, -1.0)
-    for expected_flow, expected_inventory in zip(
-        (50.0, 25.0, -50.0, -25.0),
-        (50.0, 75.0, 25.0, 0.0),
-        strict=True,
+    for step, (expected_flow, expected_inventory) in enumerate(
+        zip(
+            (50.0, 25.0, -50.0, -25.0),
+            (50.0, 75.0, 25.0, 0.0),
+            strict=True,
+        )
     ):
         observation, _, _, _, info = env.step(plan)
-        assert info[PHYSICAL_FLOW] == pytest.approx(expected_flow)
+        assert info[SCHEDULE][step] == pytest.approx(expected_flow)
         assert observation[2] == pytest.approx(expected_inventory)
 
 
@@ -285,7 +287,9 @@ def test_reset_clears_futures_and_isolates_the_next_path():
     env.step(_action(1.0, -1.0))
 
     observation, _ = env.reset()
-    assert observation[3] == pytest.approx(99.0)
+    assert observation[3] == pytest.approx(0.0)
+    assert observation[4] == pytest.approx(99.0)
+    np.testing.assert_array_equal(observation[16:28], np.zeros(N_MONTHS))
     _, reward, _, _, info = env.step(_action())
     assert reward == pytest.approx(0.0)
     assert info[FUTURES_PNL] == pytest.approx(0.0)
@@ -317,26 +321,26 @@ def test_observation_exposes_only_the_current_curve_row():
     observation_a, _ = env_a.reset()
     observation_b, _ = env_b.reset()
     np.testing.assert_array_equal(observation_a, observation_b)
-    np.testing.assert_allclose(observation_a[3:15], first_curves[0])
+    np.testing.assert_allclose(observation_a[4:16], first_curves[0])
 
     next_a, *_ = env_a.step(_action())
     next_b, *_ = env_b.step(_action())
     assert not np.array_equal(next_a, next_b)
-    np.testing.assert_allclose(next_a[3:15], first_curves[1])
+    np.testing.assert_allclose(next_a[4:16], first_curves[1])
 
 
 def test_observation_exposes_open_positions_and_cumulative_profit():
     env = _env([_custom_two_month_path(second_quote=55.0)])
     observation, _ = env.reset()
-    # Time (2), inventory (1), quotes (12), positions (12), cumulative PnL (1).
+    # Time (2), inventory (1), cumulative PnL (1), quotes (12), positions (12).
     assert observation.shape == (28,)
-    np.testing.assert_array_equal(observation[15:27], np.zeros(N_MONTHS))
-    assert observation[27] == pytest.approx(0.0)
+    np.testing.assert_array_equal(observation[16:28], np.zeros(N_MONTHS))
+    assert observation[3] == pytest.approx(0.0)
 
     observation, reward, _, _, _ = env.step(_action(1.0, -1.0))
-    assert observation[15] == pytest.approx(0.0)  # expired contract cleared
-    assert observation[16] == pytest.approx(-50.0)  # future withdrawal hedge
-    assert observation[27] == pytest.approx(reward)
+    assert observation[16] == pytest.approx(0.0)  # expired contract cleared
+    assert observation[17] == pytest.approx(-50.0)  # future withdrawal hedge
+    assert observation[3] == pytest.approx(reward)
 
 
 def test_expired_action_slot_does_not_change_a_later_decision():
@@ -351,7 +355,7 @@ def test_expired_action_slot_does_not_change_a_later_decision():
     observation_b, reward_b, _, _, info_b = env_b.step(_action(-1.0, -1.0))
     np.testing.assert_array_equal(observation_a, observation_b)
     assert reward_a == pytest.approx(reward_b)
-    assert info_a[PHYSICAL_FLOW] == pytest.approx(info_b[PHYSICAL_FLOW])
+    assert info_a[SCHEDULE][1] == pytest.approx(info_b[SCHEDULE][1])
 
 
 @pytest.mark.parametrize("bad_value", [np.nan, np.inf, -np.inf])

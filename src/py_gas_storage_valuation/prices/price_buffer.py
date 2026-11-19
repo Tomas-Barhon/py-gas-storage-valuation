@@ -33,7 +33,7 @@ class ForwardCurvePathBuffer:
 
         self._position = 0
 
-    def get_path(self):
+    def get_path(self) -> np.ndarray:
         if self.remaining < self.buffer_size * self.prefetch_threshold:
             self._refill()
 
