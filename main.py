@@ -2,7 +2,7 @@ import numpy as np
 from stable_baselines3 import SAC
 
 from py_gas_storage_valuation.data.storage import (
-    InjectionWithdrawalCurve,
+    StorageOperatingRights,
 )
 from py_gas_storage_valuation.envs.gas_storage_env import (
     dummy_vectorize_gas_storage_env,
@@ -19,8 +19,11 @@ def main():
     injection_rates = np.array([0.1, 0.08, 0.05, 0.02])
     withdrawal_rates = np.array([0.2, 0.15, 0.1, 0.05])
 
-    injection_withdrawal_curve = InjectionWithdrawalCurve(
-        bin_upper_thresholds=bin_upper_thresholds,
+    operating_rights = StorageOperatingRights(
+        max_injection_mwh_per_day=10_000.0,
+        max_withdrawal_mwh_per_day=10_000.0,
+        injection_bin_upper_thresholds=bin_upper_thresholds,
+        withdrawal_bin_upper_thresholds=bin_upper_thresholds,
         injection_rates=injection_rates,
         withdrawal_rates=withdrawal_rates,
     )
@@ -29,7 +32,7 @@ def main():
     price_buffer = ForwardCurvePathBuffer(simulator)
     storage_kwargs = {
         "_capacity": 100_000.0,
-        "_injection_withdrawal_curve": injection_withdrawal_curve,
+        "_operating_rights": operating_rights,
     }
 
     vectorized_env = dummy_vectorize_gas_storage_env(

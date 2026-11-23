@@ -5,6 +5,10 @@ import numpy as np
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from py_gas_storage_valuation.data.storage import GasStorage
+from py_gas_storage_valuation.envs.feasible_schedule import (
+    DEFAULT_MONTH_DAYS,
+    FeasibleSchedule,
+)
 from py_gas_storage_valuation.prices.price_buffer import ForwardCurvePathBuffer
 
 
@@ -55,6 +59,14 @@ class GasStorageEnv(gym.Env):
         self._gas_storage = gas_storage
         self._current_step = 0
         self._max_steps = max_steps
+        self._days_per_month = DEFAULT_MONTH_DAYS[:max_steps]
+        if len(self._days_per_month) != max_steps:
+            raise ValueError("max_steps exceeds the available month calendar.")
+        self._reachable_inventories = (
+            FeasibleSchedule.precompute_reachable_inventories(
+                gas_storage, self._days_per_month
+            )
+        )
         self._injection_costs = injection_costs
         self._withdrawal_costs = withdrawal_costs
         self._forward_curve = None
@@ -122,8 +134,13 @@ class GasStorageEnv(gym.Env):
 
         self._gas_storage = GasStorage(
             self._gas_storage._capacity,
-            self._gas_storage._injection_withdrawal_curve,
+            self._gas_storage._operating_rights,
             self._gas_storage._storage_period,
+        )
+        self._reachable_inventories = (
+            FeasibleSchedule.precompute_reachable_inventories(
+                self._gas_storage, self._days_per_month
+            )
         )
 
         self._futures_positions = np.zeros(
@@ -217,15 +234,20 @@ class GasStorageEnv(gym.Env):
         return futures_pnl
 
     def _rebalance_futures_positions(self, schedule):
-        # we already assume passed actions are zeroed out
-        self._futures_positions = schedule
-        return self._futures_positions
+        self._futures_positions = schedule.copy()
+        self._futures_positions[self._current_step] = 0.0
 
     def _decode_schedule(self, action):
         # decode the action into a feasible schedule
         # we will zero out passed time steps here
-        schedule = np.zeros_like(action, dtype=np.float32)
-
+        schedule = FeasibleSchedule.from_action(
+            action,
+            storage=self._gas_storage,
+            current_step=self._current_step,
+            reachable_inventories=self._reachable_inventories,
+            days_per_month=self._days_per_month,
+        )
+        schedule = schedule.flows
         return schedule
 
     def _settle_current_flows(self, schedule):
@@ -260,15 +282,11 @@ class GasStorageEnv(gym.Env):
         schedule = self._decode_schedule(action)
 
         phys_cf, costs, futures_pnl = self._settle_current_flows(schedule)
+        self._gas_storage.apply_monthly_flow(schedule[self._current_step])
         reward = np.array([phys_cf - costs + futures_pnl], dtype=np.float32)
         self._accumulated_pnl += reward[0]
 
-        new_schedule = self._rebalance_futures_positions(schedule)
-
-        if schedule[self._current_step] > 0:
-            self._gas_storage.inject(schedule[self._current_step])
-        else:
-            self._gas_storage.withdraw(-schedule[self._current_step])
+        self._rebalance_futures_positions(schedule)
 
         self._current_step += 1
 
@@ -288,6 +306,6 @@ class GasStorageEnv(gym.Env):
                 "phys_cf": phys_cf,
                 "costs": costs,
                 "futures_pnl": futures_pnl,
-                "schedule": new_schedule,
+                "schedule": schedule.copy(),
             },
         )

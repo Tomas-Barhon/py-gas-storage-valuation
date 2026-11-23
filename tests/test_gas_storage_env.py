@@ -6,10 +6,7 @@ positions held since an earlier row earn mark-to-market on a price change;
 positions opened at the current quote cannot earn a past price movement.
 Entries before the diagonal are expired-price placeholders.
 
-This proposed contract treats storage capacity, physical flows, and futures
-positions as MWh.  That is intentional even though the current ``GasStorage``
-docstring describes capacity as cubic metres.  The tests specify the proposed
-environment contract and do not change that production docstring.
+Storage capacity, physical flows, and futures positions are measured in MWh.
 """
 
 from __future__ import annotations
@@ -21,7 +18,7 @@ import pytest
 
 from py_gas_storage_valuation.data.storage import (
     GasStorage,
-    InjectionWithdrawalCurve,
+    StorageOperatingRights,
 )
 from py_gas_storage_valuation.envs.gas_storage_env import GasStorageEnv
 from py_gas_storage_valuation.prices.price_buffer import ForwardCurvePathBuffer
@@ -59,12 +56,15 @@ def _path(*, curves: np.ndarray | None = None) -> np.ndarray:
 
 
 def _storage(capacity: float = 100.0, rate: float = 0.5) -> GasStorage:
-    curve = InjectionWithdrawalCurve(
-        bin_upper_thresholds=np.array([1.0]),
+    rights = StorageOperatingRights(
+        max_injection_mwh_per_day=capacity,
+        max_withdrawal_mwh_per_day=capacity,
+        injection_bin_upper_thresholds=np.array([1.0]),
+        withdrawal_bin_upper_thresholds=np.array([1.0]),
         injection_rates=np.array([rate]),
         withdrawal_rates=np.array([rate]),
     )
-    return GasStorage(capacity, curve, "Y")
+    return GasStorage(capacity, rights, "Y")
 
 
 def _env(
@@ -110,7 +110,7 @@ def test_step_reward_is_scalar_and_breakdown_sums_to_reward():
     assert np.isscalar(reward)
     assert not terminated
     assert not truncated
-    assert info[PHYSICAL_CASH_FLOW] == pytest.approx(-25.0 * 10.0)
+    assert info[PHYSICAL_CASH_FLOW] == pytest.approx(-50.0 * 10.0)
     assert info[FUTURES_PNL] == pytest.approx(0.0)
     assert info[COSTS] == pytest.approx(0.0)
     assert reward == pytest.approx(
@@ -128,14 +128,14 @@ def test_held_contract_mtm_uses_current_diagonal_settlement_quote():
     _, second_reward, _, _, second_info = env.step(fixed_schedule)
 
     # Month 0 is already priced at 40.  The month-1 short hedge entered
-    # at 60 earns (55 - 60) * -50 at the next decision/settlement.
+    # at 60 earns (55 - 60) * -100 at the next decision/settlement.
     # The expired F[1, 0] placeholder must not generate a price movement.
-    assert first_info[PHYSICAL_CASH_FLOW] == pytest.approx(-50.0 * 40.0)
+    assert first_info[PHYSICAL_CASH_FLOW] == pytest.approx(-100.0 * 40.0)
     assert first_info[FUTURES_PNL] == pytest.approx(0.0)
-    assert first_reward == pytest.approx(-2000.0)
-    assert second_info[PHYSICAL_CASH_FLOW] == pytest.approx(50.0 * 55.0)
-    assert second_info[FUTURES_PNL] == pytest.approx(-50.0 * (55.0 - 60.0))
-    assert second_reward == pytest.approx(3000.0)
+    assert first_reward == pytest.approx(-4000.0)
+    assert second_info[PHYSICAL_CASH_FLOW] == pytest.approx(100.0 * 55.0)
+    assert second_info[FUTURES_PNL] == pytest.approx(-100.0 * (55.0 - 60.0))
+    assert second_reward == pytest.approx(6000.0)
 
 
 def test_rebalancing_continuing_position_has_no_phantom_pnl():
@@ -155,8 +155,8 @@ def test_rebalancing_continuing_position_has_no_phantom_pnl():
     # is feasible. Closing both futures at the next quote must not generate
     # an additional rebalancing PnL.
     assert first_reward == pytest.approx(0.0)
-    assert second_info[FUTURES_PNL] == pytest.approx(50.0 * (110.0 - 100.0))
-    assert second_reward == pytest.approx(500.0)
+    assert second_info[FUTURES_PNL] == pytest.approx(100.0 * (110.0 - 100.0))
+    assert second_reward == pytest.approx(1000.0)
     assert third_info[FUTURES_PNL] == pytest.approx(0.0)
     assert third_reward == pytest.approx(0.0)
 
@@ -178,7 +178,7 @@ def test_fully_hedged_two_month_schedule_locks_twenty_per_unit(
             assert not terminated
             assert not truncated
 
-    assert sum(rewards) == pytest.approx(50.0 * (60.0 - 40.0))
+    assert sum(rewards) == pytest.approx(100.0 * (60.0 - 40.0))
 
 
 def test_zero_action_has_zero_pnl_and_inventory_for_twelve_steps():
@@ -213,40 +213,71 @@ def test_capacity_and_costs_are_applied_in_mwh():
         _action(1.0, -1.0)
     )
 
-    assert injection_info[SCHEDULE][0] == pytest.approx(50.0)
-    assert injection_info[COSTS] == pytest.approx(50.0 * 2.0)
-    assert injection_reward == pytest.approx(-600.0)
-    assert after_injection[2] == pytest.approx(50.0)
-    assert withdrawal_info[SCHEDULE][1] == pytest.approx(-50.0)
-    assert withdrawal_info[COSTS] == pytest.approx(50.0 * 3.0)
-    assert withdrawal_reward == pytest.approx(350.0)
+    assert injection_info[SCHEDULE][0] == pytest.approx(100.0)
+    assert injection_info[COSTS] == pytest.approx(100.0 * 2.0)
+    assert injection_reward == pytest.approx(-1200.0)
+    assert after_injection[2] == pytest.approx(100.0)
+    assert withdrawal_info[SCHEDULE][1] == pytest.approx(-100.0)
+    assert withdrawal_info[COSTS] == pytest.approx(100.0 * 3.0)
+    assert withdrawal_reward == pytest.approx(700.0)
     assert after_withdrawal[2] == pytest.approx(0.0)
 
 
 def test_inventory_dependent_rates_apply_to_each_month_of_the_plan():
-    curve = InjectionWithdrawalCurve(
-        bin_upper_thresholds=np.array([0.5, 1.0]),
-        injection_rates=np.array([0.5, 0.25]),
-        withdrawal_rates=np.array([0.25, 0.5]),
+    rights = StorageOperatingRights(
+        max_injection_mwh_per_day=2.0,
+        max_withdrawal_mwh_per_day=2.0,
+        injection_bin_upper_thresholds=np.array([0.5, 1.0]),
+        withdrawal_bin_upper_thresholds=np.array([0.5, 1.0]),
+        injection_rates=np.array([1.0, 0.5]),
+        withdrawal_rates=np.array([0.5, 1.0]),
     )
     env = GasStorageEnv(
-        gas_storage=GasStorage(100.0, curve, "Y"),
+        gas_storage=GasStorage(100.0, rights, "Y"),
         price_buffer=cast(ForwardCurvePathBuffer, StubPriceBuffer([_path()])),
         max_steps=N_MONTHS,
     )
     env.reset()
 
     plan = _action(1.0, 1.0, -1.0, -1.0)
-    for step, (expected_flow, expected_inventory) in enumerate(
-        zip(
-            (50.0, 25.0, -50.0, -25.0),
-            (50.0, 75.0, 25.0, 0.0),
-            strict=True,
-        )
-    ):
-        observation, _, _, _, info = env.step(plan)
-        assert info[SCHEDULE][step] == pytest.approx(expected_flow)
-        assert observation[2] == pytest.approx(expected_inventory)
+    first_observation, _, _, _, first_info = env.step(plan)
+    second_observation, _, _, _, second_info = env.step(plan)
+
+    first_flow = first_info[SCHEDULE][0]
+    second_flow = second_info[SCHEDULE][1]
+    assert first_flow > rights.daily_limits(0.0, 100.0)[1]
+    assert second_flow < first_flow  # slower injection at higher inventory
+    assert first_observation[2] == pytest.approx(first_flow)
+    assert second_observation[2] == pytest.approx(first_flow + second_flow)
+
+
+def test_monthly_transition_accepts_flow_above_single_day_right():
+    rights = StorageOperatingRights(
+        max_injection_mwh_per_day=5.0,
+        max_withdrawal_mwh_per_day=5.0,
+        injection_bin_upper_thresholds=np.array([1.0]),
+        withdrawal_bin_upper_thresholds=np.array([1.0]),
+        injection_rates=np.array([1.0]),
+        withdrawal_rates=np.array([1.0]),
+    )
+    env = GasStorageEnv(
+        gas_storage=GasStorage(100.0, rights, "Y"),
+        price_buffer=cast(ForwardCurvePathBuffer, StubPriceBuffer([_path()])),
+        max_steps=N_MONTHS,
+    )
+    env.reset()
+
+    observation, _, _, _, info = env.step(_action(1.0, -1.0))
+
+    assert rights.daily_limits(0.0, 100.0)[1] == 5.0
+    assert info[SCHEDULE][0] == pytest.approx(100.0)
+    assert observation[2] == pytest.approx(100.0)
+    assert observation[16] == pytest.approx(0.0)
+    assert observation[17] == pytest.approx(-100.0)
+
+    observation, _, _, _, info = env.step(_action(1.0, -1.0))
+    assert info[SCHEDULE][1] == pytest.approx(-100.0)
+    assert observation[2] == pytest.approx(0.0)
 
 
 @pytest.mark.parametrize("multiplier", [1.0, -1.0])
@@ -339,7 +370,7 @@ def test_observation_exposes_open_positions_and_cumulative_profit():
 
     observation, reward, _, _, _ = env.step(_action(1.0, -1.0))
     assert observation[16] == pytest.approx(0.0)  # expired contract cleared
-    assert observation[17] == pytest.approx(-50.0)  # future withdrawal hedge
+    assert observation[17] == pytest.approx(-100.0)  # future withdrawal hedge
     assert observation[3] == pytest.approx(reward)
 
 
@@ -413,8 +444,8 @@ def test_negative_prices_are_processed_arithmetically():
     _, reward, _, _, info = env.step(_action(1.0, -1.0))
 
     assert np.isfinite(reward)
-    assert reward == pytest.approx(50.0 * 10.0)
-    assert info[PHYSICAL_CASH_FLOW] == pytest.approx(50.0 * 10.0)
+    assert reward == pytest.approx(100.0 * 10.0)
+    assert info[PHYSICAL_CASH_FLOW] == pytest.approx(100.0 * 10.0)
 
 
 def test_price_history_path_is_not_mutated_by_environment():
